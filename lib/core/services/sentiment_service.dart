@@ -1,4 +1,8 @@
 import 'dart:math';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../constants/api_config.dart';
+import 'translation_service.dart';
 
 class SentimentService {
   static final SentimentService _instance = SentimentService._internal();
@@ -133,8 +137,166 @@ class SentimentService {
     'humiliated',
   ];
 
+  // Map emotion from API to sentiment label and score
+  Map<String, dynamic> _mapEmotionToSentiment(String emotion) {
+    final emotionUpper = emotion.toUpperCase();
+    
+    // Positive emotions
+    final positiveEmotions = [
+      'HAPPY', 'JOY', 'JOYFUL', 'EXCITED', 'EXCITEMENT', 'THRILLED',
+      'DELIGHTED', 'PLEASED', 'CONTENT', 'CONTENTED', 'PEACEFUL',
+      'CALM', 'RELAXED', 'COMFORTABLE', 'CHEERFUL', 'OPTIMISTIC',
+      'HOPEFUL', 'GRATEFUL', 'THANKFUL', 'BLESSED', 'PROUD',
+      'CONFIDENT', 'LOVE', 'LOVING', 'AFFECTIONATE'
+    ];
+    
+    // Negative emotions
+    final negativeEmotions = [
+      'SAD', 'SADNESS', 'ANGRY', 'ANGER', 'FEAR', 'FEARFUL',
+      'ANXIETY', 'ANXIOUS', 'DISGUST', 'DISGUSTED', 'WORRIED',
+      'STRESSED', 'DEPRESSED', 'LONELY', 'FRUSTRATED', 'DISAPPOINTED',
+      'UPSET', 'TERRIFIED', 'SCARED', 'AFRAID', 'NERVOUS',
+      'TENSE', 'AGITATED', 'IRRITATED', 'ANNOYED', 'HURT',
+      'PAIN', 'SUFFERING', 'MISERABLE', 'HEARTBROKEN', 'CRUSHED',
+      'DEFEATED', 'FAILURE', 'LOST', 'CONFUSED', 'OVERWHELMED',
+      'EXHAUSTED', 'TIRED', 'SICK', 'ILL'
+    ];
+    
+    String label;
+    double score;
+    
+    if (positiveEmotions.contains(emotionUpper)) {
+      label = 'positive';
+      // Map positive emotions to scores between 0.3 and 1.0
+      // Strong positive emotions get higher scores
+      if (['HAPPY', 'JOY', 'JOYFUL', 'EXCITED', 'THRILLED', 'DELIGHTED'].contains(emotionUpper)) {
+        score = 0.8;
+      } else if (['LOVE', 'LOVING', 'GRATEFUL', 'THANKFUL', 'BLESSED'].contains(emotionUpper)) {
+        score = 0.9;
+      } else {
+        score = 0.5;
+      }
+    } else if (negativeEmotions.contains(emotionUpper)) {
+      label = 'negative';
+      // Map negative emotions to scores between -1.0 and -0.3
+      // Strong negative emotions get lower scores
+      if (['SAD', 'SADNESS', 'DEPRESSED', 'MISERABLE', 'HEARTBROKEN'].contains(emotionUpper)) {
+        score = -0.8;
+      } else if (['ANGRY', 'ANGER', 'TERRIFIED', 'FEAR', 'FEARFUL'].contains(emotionUpper)) {
+        score = -0.9;
+      } else {
+        score = -0.5;
+      }
+    } else {
+      label = 'neutral';
+      score = 0.0;
+    }
+    
+    return {
+      'label': label,
+      'score': score,
+      'emotion': emotionUpper,
+    };
+  }
+
+  // Analyze sentiment using Flask API
+  Future<Map<String, dynamic>> analyzeSentimentFromAPI(String text) async {
+    try {
+      print('🌐 SENTIMENT: === Sentiment API Analysis Started ===');
+      print('🌐 SENTIMENT: Original text: $text');
+      
+      if (text.trim().isEmpty) {
+        print('⚠️ SENTIMENT: Empty text provided, returning neutral sentiment');
+        return {'score': 0.0, 'label': 'neutral', 'confidence': 0.0};
+      }
+
+      // Translate text to English before sending to API
+      print('🌐 SENTIMENT: Translating text to English...');
+      final translationService = TranslationService();
+      final englishText = await translationService.translateToEnglish(text);
+      print('🌐 SENTIMENT: English text: $englishText');
+
+      final url = Uri.parse('${ApiConfig.sentimentApiUrl}/predict');
+      print('🌐 SENTIMENT: API URL: $url');
+      
+      final requestBody = json.encode({'text': englishText});
+      print('🌐 SENTIMENT: Request body: $requestBody');
+      
+      print('🌐 SENTIMENT: Sending POST request to sentiment API...');
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: requestBody,
+      ).timeout(ApiConfig.apiTimeout);
+
+      print('🌐 SENTIMENT: Response status code: ${response.statusCode}');
+      print('🌐 SENTIMENT: Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        print('🌐 SENTIMENT: Parsed response data: $data');
+        
+        final emotion = data['emotion'] as String?;
+        
+        if (emotion == null || emotion.isEmpty) {
+          print('❌ SENTIMENT: ERROR - Invalid API response - emotion field missing');
+          throw Exception('Invalid API response: emotion field missing');
+        }
+        
+        print('🎭 SENTIMENT: Detected emotion: $emotion');
+        final sentimentMapping = _mapEmotionToSentiment(emotion);
+        print('💭 SENTIMENT: Mapped sentiment: $sentimentMapping');
+        
+        final result = {
+          'score': sentimentMapping['score'] as double,
+          'label': sentimentMapping['label'] as String,
+          'emotion': sentimentMapping['emotion'] as String,
+          'confidence': 0.9, // High confidence for ML model predictions
+          'source': 'api',
+        };
+        
+        print('✅ SENTIMENT: === Sentiment API Analysis Completed Successfully ===');
+        print('✅ SENTIMENT: Final result: $result');
+        return result;
+      } else {
+        print('❌ SENTIMENT: ERROR - API request failed with status ${response.statusCode}');
+        print('❌ SENTIMENT: Response body: ${response.body}');
+        throw Exception(
+          'API request failed with status ${response.statusCode}: ${response.body}',
+        );
+      }
+    } catch (e, stackTrace) {
+      print('❌ SENTIMENT: ERROR - Exception in analyzeSentimentFromAPI: $e');
+      print('❌ SENTIMENT: Stack trace: $stackTrace');
+      rethrow;
+    }
+  }
+
   // Analyze sentiment of text
   Future<Map<String, dynamic>> analyzeSentiment(String text) async {
+    print('💭 SENTIMENT: === Sentiment Analysis Started ===');
+    print('💭 SENTIMENT: Input text: $text');
+    print('💭 SENTIMENT: API enabled: ${ApiConfig.enableSentimentApi}');
+    
+    // Try API first if enabled
+    if (ApiConfig.enableSentimentApi) {
+      try {
+        print('💭 SENTIMENT: Attempting API-based sentiment analysis...');
+        final result = await analyzeSentimentFromAPI(text);
+        print('✅ SENTIMENT: API analysis successful, returning result');
+        return result;
+      } catch (e, stackTrace) {
+        print('⚠️ SENTIMENT: WARNING - Sentiment API failed, falling back to local analysis');
+        print('⚠️ SENTIMENT: Error: $e');
+        print('⚠️ SENTIMENT: Stack trace: $stackTrace');
+        // Fall through to local analysis
+      }
+    }
+    
+    // Fallback to local keyword-based analysis
+    print('💭 SENTIMENT: Using local keyword-based sentiment analysis...');
     try {
       if (text.trim().isEmpty) {
         return {'score': 0.0, 'label': 'neutral', 'confidence': 0.0};
@@ -188,15 +350,24 @@ class SentimentService {
         }
       }
 
-      return {
+      final result = {
         'score': score,
         'label': label,
         'confidence': confidence,
         'positiveWords': positiveCount,
         'negativeWords': negativeCount,
         'totalWords': words.length,
+        'source': 'local',
       };
-    } catch (e) {
+      
+      print('✅ SENTIMENT: Local analysis completed');
+      print('💭 SENTIMENT: Result: $result');
+      print('✅ SENTIMENT: === Sentiment Analysis Completed ===');
+      
+      return result;
+    } catch (e, stackTrace) {
+      print('❌ SENTIMENT: ERROR - Failed to analyze sentiment: $e');
+      print('❌ SENTIMENT: Stack trace: $stackTrace');
       throw Exception('Failed to analyze sentiment: $e');
     }
   }

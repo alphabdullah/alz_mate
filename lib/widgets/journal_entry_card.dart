@@ -19,6 +19,11 @@ class JournalEntryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Debug: Print emotion and sentiment for troubleshooting
+    if (entry.emotion != null) {
+      print('🎭 CARD: Entry ${entry.id} - Emotion: ${entry.emotion}, Sentiment: ${entry.sentimentLabel}');
+    }
+    
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -126,6 +131,74 @@ class JournalEntryCard extends StatelessWidget {
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                 ),
+                // Display emotion badge (priority) or sentiment badge (fallback)
+                if (entry.emotion != null && entry.emotion!.isNotEmpty) ...[
+                  // Show emotion badge
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _getEmotionColor(entry.emotion!).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: _getEmotionColor(entry.emotion!).withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _getEmotionIcon(entry.emotion!),
+                          size: 16,
+                          color: _getEmotionColor(entry.emotion!),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _formatEmotionText(entry.emotion!),
+                          style: TextStyle(
+                            color: _getEmotionColor(entry.emotion!),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else if (entry.sentimentLabel != null && entry.sentimentLabel!.isNotEmpty) ...[
+                  // Fallback to sentiment badge only if emotion is not available
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _getSentimentColor(entry.sentimentLabel!).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: _getSentimentColor(entry.sentimentLabel!).withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _getSentimentIcon(entry.sentimentLabel!),
+                          size: 16,
+                          color: _getSentimentColor(entry.sentimentLabel!),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          entry.sentimentLabel!.toUpperCase(),
+                          style: TextStyle(
+                            color: _getSentimentColor(entry.sentimentLabel!),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (entry.mediaUrl != null) ...[
                   const SizedBox(height: 8),
                   Container(
@@ -199,5 +272,188 @@ class JournalEntryCard extends StatelessWidget {
     } else {
       return '${date.day}/${date.month}/${date.year}';
     }
+  }
+
+  Color _getEmotionColor(String emotion) {
+    final emotionUpper = emotion.toUpperCase();
+    switch (emotionUpper) {
+      case 'HAPPY':
+      case 'JOY':
+      case 'JOYFUL':
+      case 'EXCITED':
+      case 'THRILLED':
+      case 'DELIGHTED':
+        return Colors.orange;
+      case 'SAD':
+      case 'SADNESS':
+      case 'DEPRESSED':
+      case 'MISERABLE':
+        return Colors.blue;
+      case 'ANGRY':
+      case 'ANGER':
+      case 'FURIOUS':
+        return Colors.red;
+      case 'FEAR':
+      case 'FEARFUL':
+      case 'TERRIFIED':
+      case 'SCARED':
+        return Colors.purple;
+      case 'LOVE':
+      case 'LOVING':
+      case 'AFFECTIONATE':
+        return Colors.pink;
+      case 'PEACEFUL':
+      case 'CALM':
+      case 'RELAXED':
+        return Colors.green;
+      case 'ANXIOUS':
+      case 'ANXIETY':
+      case 'WORRIED':
+      case 'NERVOUS':
+        return Colors.amber;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getEmotionIcon(String emotion) {
+    final emotionUpper = emotion.toUpperCase();
+    switch (emotionUpper) {
+      case 'HAPPY':
+      case 'JOY':
+      case 'JOYFUL':
+      case 'EXCITED':
+      case 'THRILLED':
+      case 'DELIGHTED':
+        return Icons.sentiment_very_satisfied;
+      case 'SAD':
+      case 'SADNESS':
+      case 'DEPRESSED':
+      case 'MISERABLE':
+        return Icons.sentiment_very_dissatisfied;
+      case 'ANGRY':
+      case 'ANGER':
+      case 'FURIOUS':
+        return Icons.mood_bad;
+      case 'FEAR':
+      case 'FEARFUL':
+      case 'TERRIFIED':
+      case 'SCARED':
+        return Icons.warning;
+      case 'LOVE':
+      case 'LOVING':
+      case 'AFFECTIONATE':
+        return Icons.favorite;
+      case 'PEACEFUL':
+      case 'CALM':
+      case 'RELAXED':
+        return Icons.spa;
+      case 'ANXIOUS':
+      case 'ANXIETY':
+      case 'WORRIED':
+      case 'NERVOUS':
+        return Icons.psychology;
+      default:
+        return Icons.sentiment_neutral;
+    }
+  }
+
+  Color _getSentimentColor(String sentiment) {
+    switch (sentiment.toLowerCase()) {
+      case 'positive':
+        return Colors.green;
+      case 'negative':
+        return Colors.red;
+      case 'neutral':
+        return Colors.grey;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getSentimentIcon(String sentiment) {
+    switch (sentiment.toLowerCase()) {
+      case 'positive':
+        return Icons.sentiment_satisfied;
+      case 'negative':
+        return Icons.sentiment_dissatisfied;
+      case 'neutral':
+        return Icons.sentiment_neutral;
+      default:
+        return Icons.sentiment_neutral;
+    }
+  }
+
+  String _formatEmotionText(String emotion) {
+    // Convert emotion to readable format
+    // e.g., "JOY" -> "Joy", "HAPPY" -> "Happy", "SAD" -> "Sad"
+    final emotionUpper = emotion.toUpperCase();
+    
+    // Map common emotions to readable format
+    final emotionMap = {
+      'JOY': 'Joy',
+      'JOYFUL': 'Joyful',
+      'HAPPY': 'Happy',
+      'EXCITED': 'Excited',
+      'THRILLED': 'Thrilled',
+      'DELIGHTED': 'Delighted',
+      'SAD': 'Sad',
+      'SADNESS': 'Sadness',
+      'DEPRESSED': 'Depressed',
+      'MISERABLE': 'Miserable',
+      'ANGRY': 'Angry',
+      'ANGER': 'Anger',
+      'FURIOUS': 'Furious',
+      'FEAR': 'Fear',
+      'FEARFUL': 'Fearful',
+      'TERRIFIED': 'Terrified',
+      'SCARED': 'Scared',
+      'LOVE': 'Love',
+      'LOVING': 'Loving',
+      'AFFECTIONATE': 'Affectionate',
+      'PEACEFUL': 'Peaceful',
+      'CALM': 'Calm',
+      'RELAXED': 'Relaxed',
+      'ANXIOUS': 'Anxious',
+      'ANXIETY': 'Anxiety',
+      'WORRIED': 'Worried',
+      'NERVOUS': 'Nervous',
+      'CONTENT': 'Content',
+      'CONTENTED': 'Contented',
+      'GRATEFUL': 'Grateful',
+      'THANKFUL': 'Thankful',
+      'BLESSED': 'Blessed',
+      'OPTIMISTIC': 'Optimistic',
+      'HOPEFUL': 'Hopeful',
+      'CHEERFUL': 'Cheerful',
+      'DISGUST': 'Disgust',
+      'DISGUSTED': 'Disgusted',
+      'FRUSTRATED': 'Frustrated',
+      'DISAPPOINTED': 'Disappointed',
+      'UPSET': 'Upset',
+      'STRESSED': 'Stressed',
+      'LONELY': 'Lonely',
+      'HURT': 'Hurt',
+      'PAIN': 'Pain',
+      'SUFFERING': 'Suffering',
+      'HEARTBROKEN': 'Heartbroken',
+      'CRUSHED': 'Crushed',
+      'DEFEATED': 'Defeated',
+      'CONFUSED': 'Confused',
+      'OVERWHELMED': 'Overwhelmed',
+      'EXHAUSTED': 'Exhausted',
+      'TIRED': 'Tired',
+    };
+    
+    // Return mapped emotion or format as title case
+    if (emotionMap.containsKey(emotionUpper)) {
+      return emotionMap[emotionUpper]!;
+    }
+    
+    // Fallback: Convert to title case (e.g., "JOY" -> "Joy")
+    if (emotion.length <= 1) {
+      return emotion.toUpperCase();
+    }
+    return emotion[0].toUpperCase() + emotion.substring(1).toLowerCase();
   }
 }

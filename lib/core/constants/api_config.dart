@@ -11,6 +11,13 @@ class ApiConfig {
   // Enable/disable backend integration
   static const bool enableBackendIntegration = true;
   
+  // Sentiment Analysis API URL (Flask emotion prediction API)
+  static const String sentimentApiUrl = 'https://1900-223-123-11-119.ngrok-free.app';
+  
+  // Enable/disable sentiment API integration
+  // When enabled, uses Flask API for sentiment analysis; falls back to local analysis on error
+  static const bool enableSentimentApi = true;
+  
   // Timeout duration for API calls
   static const Duration apiTimeout = Duration(seconds: 30);
 }

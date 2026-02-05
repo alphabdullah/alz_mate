@@ -238,6 +238,12 @@ class _JournalScreenState extends State<JournalScreen>
   }
 
   Future<void> _loadJournalEntries() async {
+    print('📚 JOURNAL: Loading journal entries...');
+    if (!mounted) {
+      print('⚠️ JOURNAL: Widget not mounted, skipping load');
+      return;
+    }
+    
     setState(() {
       _isLoading = true;
     });
@@ -247,69 +253,126 @@ class _JournalScreenState extends State<JournalScreen>
       final firestoreService = Provider.of<FirestoreService>(context, listen: false);
 
       if (authService.currentUser != null) {
+        print('📚 JOURNAL: Fetching entries for user: ${authService.currentUser!.uid}');
         final entries = await firestoreService.getJournalEntriesByUserId(
           authService.currentUser!.uid,
         );
-        setState(() {
-          _journalEntries = entries;
-        });
+        print('📚 JOURNAL: Loaded ${entries.length} journal entries');
+        
+        if (mounted) {
+          setState(() {
+            _journalEntries = entries;
+            _isLoading = false;
+          });
+          print('📚 JOURNAL: UI updated with ${_journalEntries.length} entries');
+          print('📚 JOURNAL: Loading state set to false');
+        }
+      } else {
+        print('⚠️ JOURNAL: No authenticated user, cannot load entries');
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
     } catch (e) {
+      print('❌ JOURNAL: ERROR loading journal entries: $e');
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading journal entries: $e')),
         );
       }
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
     }
+    
+    print('📚 JOURNAL: Finished loading journal entries');
   }
 
   Future<void> _createJournalEntry() async {
+    print('🚀 JOURNAL: === Journal Entry Creation Started ===');
+    
     if (_contentController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please write something in your journal')),
-      );
+      print('⚠️ JOURNAL: Empty content, showing error message');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please write something in your journal')),
+        );
+      }
       return;
     }
 
     // Stop listening if active
     if (_isListening) {
+      print('🎤 JOURNAL: Stopping speech recognition');
       _stopListening();
     }
 
+    if (!mounted) {
+      print('⚠️ JOURNAL: Widget not mounted, aborting');
+      return;
+    }
+    
     setState(() {
       _isCreating = true;
     });
 
     try {
+      print('🔧 JOURNAL: Getting services from Provider...');
       final authService = Provider.of<AuthService>(context, listen: false);
       final firestoreService = Provider.of<FirestoreService>(context, listen: false);
       final storageService = Provider.of<StorageService>(context, listen: false);
       final sentimentService = Provider.of<SentimentService>(context, listen: false);
 
       if (authService.currentUser == null) {
+        print('❌ JOURNAL: ERROR - User not authenticated');
         throw Exception('User not authenticated');
       }
+
+      print('👤 JOURNAL: User authenticated: ${authService.currentUser!.uid}');
+      print('📄 JOURNAL: Journal content: ${_contentController.text.trim()}');
+      print('📋 JOURNAL: Entry type: $_selectedType');
 
       String? mediaUrl;
       // Upload image if selected
       if (_selectedImage != null && _selectedType == 'image') {
-        mediaUrl = await storageService.uploadJournalMedia(
-          _selectedImage!,
-          authService.currentUser!.uid,
-          'image',
-        );
+        print('📷 JOURNAL: Uploading image...');
+        try {
+          mediaUrl = await storageService.uploadJournalMedia(
+            _selectedImage!,
+            authService.currentUser!.uid,
+            'image',
+          );
+          print('✅ JOURNAL: Image uploaded successfully: $mediaUrl');
+        } catch (e) {
+          print('❌ JOURNAL: ERROR - Failed to upload image: $e');
+          throw Exception('Failed to upload image: $e');
+        }
       }
 
       // Analyze sentiment (fallback to local analysis)
-      final sentimentResult = await sentimentService.analyzeSentiment(
-        _contentController.text.trim(),
-      );
+      print('💭 JOURNAL: Analyzing sentiment...');
+      Map<String, dynamic> sentimentResult;
+      try {
+        sentimentResult = await sentimentService.analyzeSentiment(
+          _contentController.text.trim(),
+        );
+        print('✅ JOURNAL: Sentiment analysis completed');
+        print('💭 JOURNAL: Sentiment result: $sentimentResult');
+      } catch (e) {
+        print('⚠️ JOURNAL: WARNING - Sentiment analysis failed: $e');
+        // Use default neutral sentiment if analysis fails
+        sentimentResult = {
+          'score': 0.0,
+          'label': 'neutral',
+          'confidence': 0.0,
+        };
+        print('💭 JOURNAL: Using default neutral sentiment');
+      }
 
       // Create new journal entry
+      print('📝 JOURNAL: Creating journal entry model...');
       final newEntry = JournalEntryModel(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         userId: authService.currentUser!.uid,
@@ -317,19 +380,40 @@ class _JournalScreenState extends State<JournalScreen>
         timestamp: DateTime.now(),
         type: _selectedType,
         mediaUrl: mediaUrl,
-        sentimentScore: sentimentResult['score'] ?? 0.0,
-        sentimentLabel: sentimentResult['label'] ?? 'neutral',
+        sentimentScore: (sentimentResult['score'] as num?)?.toDouble() ?? 0.0,
+        sentimentLabel: sentimentResult['label'] as String? ?? 'neutral',
+        emotion: sentimentResult['emotion'] as String?, // Save emotion from API
         isPrivate: false,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       );
+      print('📝 JOURNAL: Journal entry model created: ${newEntry.id}');
+      print('📝 JOURNAL: Emotion saved: ${newEntry.emotion ?? "NULL"}');
+      print('📝 JOURNAL: Sentiment label: ${newEntry.sentimentLabel}');
+      print('📝 JOURNAL: Sentiment result keys: ${sentimentResult.keys}');
 
       // Save to Firestore
-      final entryId = await firestoreService.createJournalEntry(newEntry);
+      print('💾 JOURNAL: Saving to Firestore...');
+      String entryId;
+      try {
+        entryId = await firestoreService.createJournalEntry(newEntry);
+        print('✅ JOURNAL: Saved to Firestore with ID: $entryId');
+      } catch (e) {
+        print('❌ JOURNAL: ERROR - Failed to save to Firestore: $e');
+        throw Exception('Failed to save journal entry: $e');
+      }
+      
       final savedEntry = newEntry.copyWith(id: entryId);
+      print('📝 JOURNAL: Saved entry details:');
+      print('   - ID: ${savedEntry.id}');
+      print('   - Content: ${savedEntry.content}');
+      print('   - Sentiment: ${savedEntry.sentimentLabel} (${savedEntry.sentimentScore})');
+      print('   - Emotion: ${savedEntry.emotion ?? 'N/A'}');
+      print('   - Timestamp: ${savedEntry.timestamp}');
 
       // Analyze emotion using backend API (async, non-blocking)
       if (ApiConfig.enableBackendIntegration) {
+        print('🎭 JOURNAL: Triggering emotion analysis (async)...');
         _analyzeEmotionForEntry(
           authService.currentUser!.uid,
           _contentController.text.trim(),
@@ -338,31 +422,68 @@ class _JournalScreenState extends State<JournalScreen>
         );
       }
 
-      // Update local list
-      setState(() {
-        _journalEntries.insert(0, savedEntry);
-        _contentController.clear();
-        _selectedImage = null;
-        _selectedImageUrl = null;
-        _selectedType = 'text';
-        _lastWords = '';
-      });
+      // Clear form fields
+      _contentController.clear();
+      _selectedImage = null;
+      _selectedImageUrl = null;
+      _selectedType = 'text';
+      _lastWords = '';
 
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Journal entry saved successfully!'),
-          backgroundColor: AppColors.success,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving journal entry: $e')),
-      );
+      // Close dialog if still open FIRST, before reloading
+      if (mounted && Navigator.canPop(context)) {
+        print('📝 JOURNAL: Closing dialog...');
+        Navigator.pop(context);
+        // Small delay to ensure dialog is closed and UI updates
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      // Reload entries from Firestore to ensure consistency
+      // This will replace the local list with fresh data from Firestore
+      print('📝 JOURNAL: Reloading entries from Firestore...');
+      if (mounted) {
+        await _loadJournalEntries();
+        print('📝 JOURNAL: Entries reloaded. Total entries: ${_journalEntries.length}');
+        
+        // Double-check loading state is false
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+          print('📝 JOURNAL: Final state - isLoading: false, entries: ${_journalEntries.length}');
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Journal entry saved successfully!'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+      
+      print('✅ JOURNAL: === Journal Entry Creation Completed Successfully ===');
+    } catch (e, stackTrace) {
+      print('❌ JOURNAL: ERROR - Exception in _createJournalEntry: $e');
+      print('❌ JOURNAL: Stack trace: $stackTrace');
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving journal entry: ${e.toString()}'),
+            backgroundColor: AppColors.danger,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     } finally {
-      setState(() {
-        _isCreating = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isCreating = false;
+        });
+        print('🔄 JOURNAL: Reset _isCreating flag');
+      }
+      print('🏁 JOURNAL: === Journal Entry Creation Process Ended ===');
     }
   }
 
@@ -846,8 +967,11 @@ class _JournalScreenState extends State<JournalScreen>
 
   @override
   Widget build(BuildContext context) {
+    print('🔄 JOURNAL: Building widget - isLoading: $_isLoading, entries: ${_journalEntries.length}');
+    
     return Scaffold(
       backgroundColor: AppColors.background,
+      key: ValueKey('journal_screen_${_journalEntries.length}_${DateTime.now().millisecondsSinceEpoch}'),
       appBar: AppBar(
         title: const Text('My Journal'),
         backgroundColor: Colors.white,
@@ -867,14 +991,11 @@ class _JournalScreenState extends State<JournalScreen>
           const SizedBox(width: 16),
         ],
       ),
-      body: FadeTransition(
-        opacity: _fadeAnimation,
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _journalEntries.isEmpty
-                ? _buildEmptyState()
-                : _buildJournalList(),
-      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _journalEntries.isEmpty
+              ? _buildEmptyState()
+              : _buildJournalList(),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showCreateEntryDialog,
         backgroundColor: AppColors.primary,

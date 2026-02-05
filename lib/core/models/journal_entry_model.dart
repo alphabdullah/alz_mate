@@ -9,6 +9,7 @@ class JournalEntryModel {
   final String? mediaUrl;
   final double? sentimentScore; // -1.0 to 1.0 (negative to positive)
   final String? sentimentLabel; // 'positive', 'negative', 'neutral'
+  final String? emotion; // Emotion detected by API (e.g., 'HAPPY', 'SAD', 'ANGRY')
   final List<String>? tags;
   final String? location;
   final bool isPrivate;
@@ -25,6 +26,7 @@ class JournalEntryModel {
     this.mediaUrl,
     this.sentimentScore,
     this.sentimentLabel,
+    this.emotion,
     this.tags,
     this.location,
     this.isPrivate = false,
@@ -45,6 +47,7 @@ class JournalEntryModel {
       mediaUrl: map['mediaUrl'],
       sentimentScore: map['sentimentScore']?.toDouble(),
       sentimentLabel: map['sentimentLabel'],
+      emotion: map['emotion'],
       tags: map['tags'] != null ? List<String>.from(map['tags']) : null,
       location: map['location'],
       isPrivate: map['isPrivate'] ?? false,
@@ -67,6 +70,7 @@ class JournalEntryModel {
         'mediaUrl': mediaUrl,
         'sentimentScore': sentimentScore,
         'sentimentLabel': sentimentLabel,
+        'emotion': emotion,
         'tags': tags,
         'location': location,
         'isPrivate': isPrivate,
@@ -84,6 +88,7 @@ class JournalEntryModel {
     String? mediaUrl,
     double? sentimentScore,
     String? sentimentLabel,
+    String? emotion,
     List<String>? tags,
     String? location,
     bool? isPrivate,
@@ -100,6 +105,7 @@ class JournalEntryModel {
       mediaUrl: mediaUrl ?? this.mediaUrl,
       sentimentScore: sentimentScore ?? this.sentimentScore,
       sentimentLabel: sentimentLabel ?? this.sentimentLabel,
+      emotion: emotion ?? this.emotion,
       tags: tags ?? this.tags,
       location: location ?? this.location,
       isPrivate: isPrivate ?? this.isPrivate,
