@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_styles.dart';
 import '../../core/services/firestore_service.dart';
+import '../../core/services/behavior_analysis_service.dart';
 import '../../core/models/user_model.dart';
 import '../../core/models/mood_entry_model.dart';
 import '../../core/models/reminder_model.dart';
 import '../../core/models/game_score_model.dart';
 import '../../core/models/journal_entry_model.dart';
+import '../../core/models/behavior_analysis_model.dart';
 import '../../widgets/mood_graph.dart';
+import 'behavior_analysis_result_screen.dart';
 
 class PatientDetailScreen extends StatefulWidget {
   final UserModel patient;
@@ -31,18 +35,47 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
   List<GameScoreModel> _gameScores = [];
   List<JournalEntryModel> _journalEntries = [];
   List<ReminderModel> _missedNotifications = [];
+  List<BehaviorAnalysisModel> _behaviorAnalyses = [];
+  bool _runningBehaviorAnalysis = false;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
+    _tabController.addListener(_onTabChanged);
     _loadPatientData();
+  }
+
+  void _onTabChanged() {
+    if (!_tabController.indexIsChanging &&
+        _tabController.index == 3 &&
+        mounted) {
+      _loadBehaviorAnalyses();
+    }
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadBehaviorAnalyses() async {
+    try {
+      final list = await BehaviorAnalysisService()
+          .getPatientAnalyses(widget.patient.id, limit: 500);
+      if (mounted) setState(() => _behaviorAnalyses = list);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not load analyses: $e'),
+            backgroundColor: AppColors.danger,
+          ),
+        );
+      }
+    }
   }
 
   _loadPatientMissedNotifications() async {
@@ -77,6 +110,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         _firestoreService.getRemindersByUserId(widget.patient.id),
         _firestoreService.getGameScoresByUserId(widget.patient.id),
         _firestoreService.getJournalEntriesByUserId(widget.patient.id),
+        BehaviorAnalysisService().getPatientAnalyses(widget.patient.id, limit: 500),
       ]);
 
       setState(() {
@@ -84,6 +118,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         _reminders = results[1] as List<ReminderModel>;
         _gameScores = results[2] as List<GameScoreModel>;
         _journalEntries = results[3] as List<JournalEntryModel>;
+        _behaviorAnalyses = results[4] as List<BehaviorAnalysisModel>;
         _isLoading = false;
       });
     } catch (e) {
@@ -91,6 +126,59 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         _error = e.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _runBehaviorAnalysis() async {
+    if (_runningBehaviorAnalysis) return;
+    setState(() => _runningBehaviorAnalysis = true);
+    try {
+      final analysis = await BehaviorAnalysisService().analyzePatientBehavior(
+        widget.patient.id,
+        saveToFirebase: true,
+      );
+      if (mounted) {
+        setState(() {
+          _behaviorAnalyses = [analysis, ..._behaviorAnalyses];
+          _runningBehaviorAnalysis = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Behaviour analysis saved. Overall: ${analysis.overallGrade} (${analysis.overallScore.toStringAsFixed(0)}%)'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => BehaviorAnalysisResultScreen(analysis: analysis),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _runningBehaviorAnalysis = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Analysis failed: $e'),
+            backgroundColor: AppColors.danger,
+          ),
+        );
+      }
+    }
+  }
+
+  Color _healthStatusColor(String status) {
+    switch (status) {
+      case 'Excellent':
+        return AppColors.success;
+      case 'Good':
+        return Colors.green;
+      case 'Fair':
+        return AppColors.warning;
+      case 'Needs Attention':
+        return AppColors.danger;
+      default:
+        return AppColors.textSecondary;
     }
   }
 
@@ -225,10 +313,10 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                   ),
                   Column(
                     children: [
-                      IconButton(
-                        onPressed: () => _initiateCall(),
-                        icon: const Icon(Icons.phone, color: AppColors.success),
-                      ),
+                      // IconButton(
+                      //   onPressed: () => _initiateCall(),
+                      //   // icon: const Icon(Icons.phone, color: AppColors.success),
+                      // ),
                       IconButton(
                         onPressed: () => _sendMessage(),
                         icon: const Icon(
@@ -271,6 +359,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                   Tab(text: 'Overview'),
                   Tab(text: 'Health'),
                   Tab(text: 'Activity'),
+                  Tab(text: 'Behaviour'),
                   Tab(text: 'Missed Notifications'),
                 ],
               ),
@@ -283,6 +372,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                   _buildOverviewTab(),
                   _buildHealthTab(),
                   _buildActivityTab(),
+                  _buildBehaviourTab(),
                   _buildMissedNotificationsTab(),
                 ],
               ),
@@ -307,6 +397,234 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
           fontWeight: FontWeight.w600,
         ),
       ),
+    );
+  }
+
+  Widget _buildBehaviourTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: _buildBehaviourAnalysisSection(),
+    );
+  }
+
+  Widget _buildBehaviourAnalysisSection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: AppStyles.elevatedCard,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Behaviour Analysis', style: AppStyles.titleMedium),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _runningBehaviorAnalysis ? null : _runBehaviorAnalysis,
+              icon: _runningBehaviorAnalysis
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.analytics),
+              label: Text(
+                _runningBehaviorAnalysis
+                    ? 'Running analysis…'
+                    : 'Run new analysis',
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+          if (_behaviorAnalyses.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            ..._buildBehaviorAnalysesByMonth(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Groups analyses by month (newest first). Each month shows a header and all analyses for that month.
+  List<Widget> _buildBehaviorAnalysesByMonth() {
+    if (_behaviorAnalyses.isEmpty) return [];
+
+    final Map<String, List<BehaviorAnalysisModel>> byMonth = {};
+    for (final a in _behaviorAnalyses) {
+      final key =
+          '${a.analyzedAt.year}-${a.analyzedAt.month.toString().padLeft(2, '0')}';
+      byMonth.putIfAbsent(key, () => []).add(a);
+    }
+    for (final list in byMonth.values) {
+      list.sort((a, b) => b.analyzedAt.compareTo(a.analyzedAt));
+    }
+    final keys = byMonth.keys.toList()..sort((a, b) => b.compareTo(a));
+
+    final List<Widget> widgets = [];
+    for (final key in keys) {
+      final analyses = byMonth[key]!;
+      final year = int.parse(key.split('-')[0]);
+      final month = int.parse(key.split('-')[1]);
+      final monthLabel =
+          DateFormat.yMMM().format(DateTime(year, month, 1));
+
+      widgets.add(const SizedBox(height: 4));
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            monthLabel,
+            style: AppStyles.bodyMedium.copyWith(
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+        ),
+      );
+      for (final analysis in analyses) {
+        widgets.add(Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _buildBehaviorAnalysisCard(analysis),
+        ));
+      }
+    }
+    return widgets;
+  }
+
+  Widget _buildBehaviorAnalysisCard(BehaviorAnalysisModel analysis) {
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) =>
+                BehaviorAnalysisResultScreen(analysis: analysis),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        analysis.overallScore.toStringAsFixed(0),
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: _healthStatusColor(analysis.healthStatus),
+                        ),
+                      ),
+                      Text(
+                        '${analysis.overallGrade} · ${analysis.healthStatus}',
+                        style: AppStyles.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _healthStatusColor(analysis.healthStatus)
+                        .withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    DateFormat.yMMMd().format(analysis.analyzedAt),
+                    style: AppStyles.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.chevron_right,
+                    color: AppColors.textSecondary),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Period: ${DateFormat.yMMMd().format(analysis.periodStart)} – ${DateFormat.yMMMd().format(analysis.periodEnd)}',
+              style: AppStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBehaviourRow(
+    String label,
+    double score,
+    IconData icon,
+    int count,
+    String subtitle,
+  ) {
+    final color = score >= 80
+        ? AppColors.success
+        : score >= 60
+            ? AppColors.primary
+            : score >= 40
+                ? AppColors.warning
+                : AppColors.danger;
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: color),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: AppStyles.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                '$subtitle · ${score.toStringAsFixed(0)}%',
+                style: AppStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '${score.toStringAsFixed(0)}%',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: color,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

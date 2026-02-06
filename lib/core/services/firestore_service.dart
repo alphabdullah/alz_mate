@@ -489,6 +489,28 @@ class FirestoreService {
     }
   }
 
+  // Read reminders by date range
+  Future<List<ReminderModel>> getRemindersByDateRange(
+    String userId,
+    DateTime startDate,
+    DateTime endDate,
+  ) async {
+    try {
+      final query = await _firestore
+          .collection(remindersCollection)
+          .where('userId', isEqualTo: userId)
+          .where('time', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+          .where('time', isLessThanOrEqualTo: Timestamp.fromDate(endDate))
+          .get();
+
+      return query.docs
+          .map((doc) => ReminderModel.fromMap(doc.id, doc.data()))
+          .toList();
+    } catch (e) {
+      throw Exception('Failed to get reminders by date range: $e');
+    }
+  }
+
   // ==================== JOURNAL ENTRY CRUD OPERATIONS ====================
 
   // Create journal entry
@@ -1150,6 +1172,28 @@ class FirestoreService {
       await _firestore.collection(gameScoresCollection).doc(scoreId).delete();
     } catch (e) {
       throw Exception('Failed to delete game score: $e');
+    }
+  }
+
+  // Read game scores by date range
+  Future<List<GameScoreModel>> getGameScoresByDateRange(
+    String userId,
+    DateTime startDate,
+    DateTime endDate,
+  ) async {
+    try {
+      final query = await _firestore
+          .collection(gameScoresCollection)
+          .where('userId', isEqualTo: userId)
+          .where('playedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+          .where('playedAt', isLessThanOrEqualTo: Timestamp.fromDate(endDate))
+          .get();
+
+      return query.docs
+          .map((doc) => GameScoreModel.fromMap({...doc.data(), 'id': doc.id}))
+          .toList();
+    } catch (e) {
+      throw Exception('Failed to get game scores by date range: $e');
     }
   }
 
