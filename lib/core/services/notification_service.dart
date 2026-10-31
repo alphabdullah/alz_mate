@@ -50,6 +50,13 @@ class NotificationService {
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
+    // Request notification permission on Android 13+
+    final androidPlugin = _localNotifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    if (androidPlugin != null) {
+      await androidPlugin.requestNotificationsPermission();
+    }
+
     // Initialize Firebase messaging
     await _initializeFirebaseMessaging();
 
@@ -147,130 +154,150 @@ class NotificationService {
     );
   }
 
-Future<void> scheduleReminderNotification(ReminderModel reminder) async {
-  final currentUserId = reminder.userId;
-  final currentUser = AuthService().currentUser;
+  Future<void> scheduleReminderNotification(ReminderModel reminder) async {
+    if (!_isInitialized) await initialize();
 
-  final cargivers = await _firestoreService.getPatientCaregivers(currentUserId);
-  final token = await NotificationServices().getAccessToken();
+    // Schedule local notification at the exact time the user chose (use their local wall-clock time)
+    try {
+      // Build TZDateTime from reminder's date/time in device local timezone so it fires at the set time
+      final t = reminder.time;
+      final scheduledDate = tz.TZDateTime(
+        tz.local,
+        t.year,
+        t.month,
+        t.day,
+        t.hour,
+        t.minute,
+        0,
+      );
+      final now = tz.TZDateTime.now(tz.local);
+      print('🕐 Reminder scheduled at: $scheduledDate (now: $now)');
 
-  // Notify caregivers via FCM
-  for (UserModel c in cargivers) {
-    await NotificationServices().sendNotification(
-      c.fcmToken!,
-      token,
-      '${currentUser?.displayName ?? "Patient"} has set a reminder for ${reminder.type} at ${reminder.time}',
-      'Reminder Set by Patient',
-    );
-  }
+      if (scheduledDate.isBefore(now) || scheduledDate.isAtSameMomentAs(now)) {
+        print('⚠️ Reminder time is in the past, skipping schedule');
+        return;
+      }
 
-  if (!_isInitialized) await initialize();
+      const androidDetails = AndroidNotificationDetails(
+        'reminder_channel',
+        'Reminders',
+        channelDescription: 'Medication and appointment reminders',
+        importance: Importance.high,
+        priority: Priority.high,
+        showWhen: true,
+        icon: '@mipmap/ic_launcher',
+      );
 
-  try {
-    final scheduledDate = tz.TZDateTime.from(reminder.time, tz.local);
-    final now = tz.TZDateTime.now(tz.local);
-    print('🕐 Scheduling reminder at: $scheduledDate (Now: $now)');
+      const iosDetails = DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      );
 
-    if (scheduledDate.isBefore(now)) return;
+      const notificationDetails = NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      );
 
-    const androidDetails = AndroidNotificationDetails(
-      'reminder_channel',
-      'Reminders',
-      channelDescription: 'Medication and appointment reminders',
-      importance: Importance.high,
-      priority: Priority.high,
-      showWhen: true,
-      icon: '@mipmap/ic_launcher',
-    );
+      final notificationId = reminder.id.hashCode & 0x7FFFFFFF;
+      await _localNotifications.zonedSchedule(
+        notificationId,
+        reminder.title,
+        reminder.description ?? 'Time for your reminder',
+        scheduledDate,
+        notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: reminder.repeatDaily
+            ? DateTimeComponents.time
+            : DateTimeComponents.dateAndTime,
+        payload: 'reminder:${reminder.id}',
+      );
+      print('✅ Local reminder scheduled for: $scheduledDate');
 
-    const iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    const notificationDetails = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
-
-    await _localNotifications.zonedSchedule(
-      reminder.id.hashCode,
-      reminder.title,
-      reminder.description ?? 'Time for your reminder',
-      scheduledDate,
-      notificationDetails,
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      matchDateTimeComponents: reminder.repeatDaily
-      ? DateTimeComponents.time
-      : DateTimeComponents.dateAndTime,
-     
-      payload: 'reminder:${reminder.id}',
-    );
-
-    if (reminder.repeatDaily) {
-      await _scheduleRepeatingReminder(reminder);
+      if (reminder.repeatDaily) {
+        await _scheduleRepeatingReminder(reminder);
+      }
+    } catch (e) {
+      print('❌ Error scheduling reminder notification: $e');
+      rethrow;
     }
-  } catch (e) {
-    print('❌ Error scheduling reminder notification: $e');
+
+    // Notify caregivers via FCM (do not block or fail the flow)
+    try {
+      final currentUserId = reminder.userId;
+      final currentUser = AuthService().currentUser;
+      final caregivers = await _firestoreService.getPatientCaregivers(currentUserId);
+      final token = await NotificationServices().getAccessToken();
+      for (final UserModel c in caregivers) {
+        if (c.fcmToken != null && c.fcmToken!.isNotEmpty) {
+          await NotificationServices().sendNotification(
+            c.fcmToken!,
+            token,
+            '${currentUser?.displayName ?? "Patient"} has set a reminder for ${reminder.type} at ${reminder.time}',
+            'Reminder Set by Patient',
+          );
+        }
+      }
+    } catch (e) {
+      print('⚠️ Caregiver notify failed (reminder still scheduled): $e');
+    }
   }
-}
 
 
   Future<void> _scheduleRepeatingReminder(ReminderModel reminder) async {
-  try {
-    const androidDetails = AndroidNotificationDetails(
-      'daily_reminder_channel',
-      'Daily Reminders',
-      channelDescription: 'Daily repeating reminders',
-      importance: Importance.high,
-      priority: Priority.high,
-      showWhen: true,
-    );
+    try {
+      const androidDetails = AndroidNotificationDetails(
+        'daily_reminder_channel',
+        'Daily Reminders',
+        channelDescription: 'Daily repeating reminders',
+        importance: Importance.high,
+        priority: Priority.high,
+        showWhen: true,
+      );
 
-    const iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
+      const iosDetails = DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      );
 
-    const notificationDetails = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
+      const notificationDetails = NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      );
 
-    final now = tz.TZDateTime.now(tz.local);
-    var scheduledDate = tz.TZDateTime(
-      tz.local,
-      now.year,
-      now.month,
-      now.day,
-      reminder.time.hour,
-      reminder.time.minute,
-    );
+      final now = tz.TZDateTime.now(tz.local);
+      var scheduledDate = tz.TZDateTime(
+        tz.local,
+        now.year,
+        now.month,
+        now.day,
+        reminder.time.hour,
+        reminder.time.minute,
+        0,
+      );
 
-    if (scheduledDate.isBefore(now)) {
-      scheduledDate = scheduledDate.add(const Duration(days: 1));
+      if (scheduledDate.isBefore(now) || scheduledDate.isAtSameMomentAs(now)) {
+        scheduledDate = scheduledDate.add(const Duration(days: 1));
+      }
+
+      print('🔁 Scheduling daily reminder at: $scheduledDate');
+
+      final notificationId = (reminder.id.hashCode & 0x7FFFFFFF) + 1000;
+      await _localNotifications.zonedSchedule(
+        notificationId,
+        reminder.title,
+        reminder.description ?? 'Daily reminder',
+        scheduledDate,
+        notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: DateTimeComponents.time,
+        payload: 'daily_reminder:${reminder.id}',
+      );
+    } catch (e) {
+      print('❌ Error scheduling repeating reminder: $e');
     }
-
-    print('🔁 Scheduling daily reminder at: $scheduledDate');
-
-    await _localNotifications.zonedSchedule(
-      reminder.id.hashCode + 1000,
-      reminder.title,
-      reminder.description ?? 'Daily reminder',
-      scheduledDate,
-      notificationDetails,
-     androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-
-      
-      matchDateTimeComponents: DateTimeComponents.time,
-      payload: 'daily_reminder:${reminder.id}',
-    );
-  } catch (e) {
-    print('❌ Error scheduling repeating reminder: $e');
   }
-}
 
   Future<void> showNotification({
     required String title,
@@ -309,10 +336,9 @@ Future<void> scheduleReminderNotification(ReminderModel reminder) async {
 
   Future<void> cancelReminderNotification(String reminderId) async {
     try {
-      await _localNotifications.cancel(reminderId.hashCode);
-      await _localNotifications.cancel(
-        reminderId.hashCode + 1000,
-      ); // Cancel repeating too
+      final id = reminderId.hashCode & 0x7FFFFFFF;
+      await _localNotifications.cancel(id);
+      await _localNotifications.cancel(id + 1000);
     } catch (e) {
       print('Error canceling reminder notification: $e');
     }

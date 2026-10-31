@@ -4,6 +4,7 @@ import 'package:alz_mate/core/services/storage_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest.dart' as t;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -26,9 +27,16 @@ void main() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-  // Initialize timezone data
+  // Initialize timezone data for scheduled notifications (must match device timezone)
   t.initializeTimeZones();
-  tz.setLocalLocation(tz.getLocation('Asia/Karachi')); // 🔥 Add this line
+  try {
+    final deviceTz = await FlutterTimezone.getLocalTimezone();
+    print('Device timezone: ${deviceTz.identifier}');
+    tz.setLocalLocation(tz.getLocation(deviceTz.identifier));
+  } catch (e) {
+    print('Error setting local timezone: $e');
+    tz.setLocalLocation(tz.getLocation('UTC'));
+  }
 
   // Initialize core services (e.g., Firestore, Location, Notifications, SOS)
   await _initializeServices();
